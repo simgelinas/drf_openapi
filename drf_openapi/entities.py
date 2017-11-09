@@ -347,6 +347,24 @@ class OpenApiSchemaGenerator(SchemaGenerator):
                         nested_obj[field.field_name]['description'] = field.help_text
                         continue
 
+                # Support for multi-dimensional arrays
+                elif isinstance(field.child.__class__(), (serializers.ListSerializer, serializers.ListField)):
+                    array_dimensions = 2
+                    child_class = field.child.__class__()
+                    while isinstance(child_class.child.__class__(),
+                                     (serializers.ListSerializer, serializers.ListField)):
+                        array_dimensions += 1
+                        child_class = child_class.child.__class__()
+
+                    fields.append(Field(
+                        name=field.field_name,
+                        location='form',
+                        required=field.required,
+                        schema=field_to_schema(child_class),  # innermost child type (as all other are nested lists)
+                        description='{}D Array'.format(array_dimensions)
+                    ))
+                    continue
+
             # Otherwise, carry-on and use the field's schema.
             fields.append(Field(
                 name=field.field_name,
