@@ -372,6 +372,18 @@ class OpenApiSchemaGenerator(SchemaGenerator):
                     nested_obj[field.field_name]['description'] = field.help_text
                     continue
 
+            # If the field is a list
+            elif isinstance(field, (serializers.ListSerializer, serializers.ListField)):
+                # And if the child is a serializer
+                if isinstance(field.child.__class__(), serializers.Serializer):
+                    subfield_schema = self.get_response_object(field.child.__class__, None)[0].get('schema')
+
+                    # If the schema exists, use it as the nested_obj
+                    if subfield_schema is not None:
+                        nested_obj[field.field_name] = subfield_schema
+                        nested_obj[field.field_name]['description'] = field.help_text
+                        continue
+
             # Otherwise, carry-on and use the field's schema.
             fallback_schema = self.fallback_schema_from_field(field)
             fields.append(Field(
