@@ -346,8 +346,8 @@ class OpenApiSchemaGenerator(SchemaGenerator):
                     # If the schema exists, use it as the nested_obj
                     if subfield_schema is not None:
                         nested_obj[field.field_name] = subfield_schema
-                        nested_obj[field.field_name]['description'] = 'Array of objects [{}]'.format(
-                            field.field_name) + (', ' + field.help_text if field.help_text is not None else '')
+                        nested_obj[field.field_name]['description'] = '[ Array of objects ]' + (
+                            ', ' + field.help_text if field.help_text is not None else '')
                         continue
 
                 # Support for multi-dimensional arrays
