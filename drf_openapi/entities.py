@@ -80,6 +80,7 @@ class VersionedSerializers:
                 return schema
 
         raise ValueError('Invalid request version {}'.format(request_version))
+
     get.__func__.__annotations__ = {'request_version': str}
 
 
@@ -218,6 +219,7 @@ class OpenApiSchemaGenerator(SchemaGenerator):
         if issubclass(pager, (PageNumberPagination, LimitOffsetPagination)):
             class FakeListSerializer(FakePrevNextListSerializer):
                 count = IntegerField()
+
             return FakeListSerializer
         elif issubclass(pager, CursorPagination):
             return FakePrevNextListSerializer
@@ -344,7 +346,8 @@ class OpenApiSchemaGenerator(SchemaGenerator):
                     # If the schema exists, use it as the nested_obj
                     if subfield_schema is not None:
                         nested_obj[field.field_name] = subfield_schema
-                        nested_obj[field.field_name]['description'] = field.help_text
+                        nested_obj[field.field_name]['description'] = 'Array of objects [{}]'.format(
+                            field.field_name) + (', ' + field.help_text if field.help_text is not None else '')
                         continue
 
                 # Support for multi-dimensional arrays
@@ -378,12 +381,12 @@ class OpenApiSchemaGenerator(SchemaGenerator):
         if not res:
             if nested_obj:
                 return {
-                    'description': description,
-                    'schema': {
-                        'type': 'object',
-                        'properties': nested_obj
-                    }
-                }, {}
+                           'description': description,
+                           'schema': {
+                               'type': 'object',
+                               'properties': nested_obj
+                           }
+                       }, {}
             else:
                 return {}, {}
 
