@@ -327,6 +327,11 @@ class OpenApiSchemaGenerator(SchemaGenerator):
         nested_obj = {}
 
         for field in serializer.fields.values():
+
+            # This is very patchy, but basically enables typed output from fields populated by methods in modelSerializers
+            if isinstance(field, serializers.SerializerMethodField) and hasattr(field, 'method_output_type'):
+                field = field.method_output_type
+
             # If field is a serializer, attempt to get its schema.
             if isinstance(field, serializers.Serializer):
                 subfield_schema = self.get_response_object(field.__class__, None)[0].get('schema')
