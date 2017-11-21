@@ -330,7 +330,11 @@ class OpenApiSchemaGenerator(SchemaGenerator):
 
             # This is very patchy, but basically enables typed output from fields populated by methods in modelSerializers
             if isinstance(field, serializers.SerializerMethodField) and hasattr(field, 'method_output_type'):
+                field_name = field.field_name
+                field_required = field.required
                 field = field.method_output_type
+                field.field_name = field_name
+                field.required = field_required
 
             # If field is a serializer, attempt to get its schema.
             if isinstance(field, serializers.Serializer):
