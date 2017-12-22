@@ -154,8 +154,11 @@ class OpenApiSchemaGenerator(SchemaGenerator):
         return '\n'.join(doc)
 
     def get_link(self, path, method, view, version=None):
+        method_name = getattr(view, 'action', method.lower())
+        method_func = getattr(view, method_name, None)
+
         fields = self.get_path_fields(path, method, view)
-        fields += self.get_serializer_fields(path, method, view, version=version)
+        fields += self.get_serializer_fields(path, method, view, version=version, method_func=method_func)
         fields += view.schema.get_pagination_fields(path, method)
         fields += view.schema.get_filter_fields(path, method)
 
@@ -165,9 +168,6 @@ class OpenApiSchemaGenerator(SchemaGenerator):
             encoding = None
 
         description = view.schema.get_description(path, method)
-
-        method_name = getattr(view, 'action', method.lower())
-        method_func = getattr(view, method_name, None)
 
         request_serializer_class = getattr(method_func, 'request_serializer', None)
         if request_serializer_class and issubclass(request_serializer_class, VersionedSerializers):
@@ -210,6 +210,10 @@ class OpenApiSchemaGenerator(SchemaGenerator):
         class FakePrevNextListSerializer(BaseFakeListSerializer):
             next = URLField()
             previous = URLField()
+
+        # Validate if the view has a pagination_class
+        if not (hasattr(view, 'pagination_class')) or view.pagination_class is None:
+            return BaseFakeListSerializer
 
         pager = view.pagination_class
         if hasattr(pager, 'default_pager'):
@@ -273,7 +277,40 @@ class OpenApiSchemaGenerator(SchemaGenerator):
 
         return fields
 
-    def get_serializer_fields(self, path, method, view, version=None):
+    def get_serializer_class(self, view, method_func):
+        """
+        Try to get the serializer class from view method.
+        If view method don't have request serializer, fallback to serializer_class on view class
+        """
+        if hasattr(method_func, 'request_serializer'):
+            return getattr(method_func, 'request_serializer')
+
+        if hasattr(view, 'serializer_class'):
+            return getattr(view, 'serializer_class')
+
+        if hasattr(view, 'get_serializer_class'):
+            return getattr(view, 'get_serializer_class')()
+
+        return None
+
+    def fallback_schema_from_field(self, field):
+        """ Fallback schema for field that isn't inspected properly by DRF
+        and probably won't land in upstream canon due to its hacky nature only for doc purposes
+        """
+        title = force_text(field.label) if field.label else ''
+        description = force_text(field.help_text) if field.help_text else ''
+
+        # since we can't really inspect dictfield and jsonfield, at least display object as type
+        # instead of string
+        if isinstance(field, (serializers.DictField, serializers.JSONField)):
+            return coreschema.Object(
+                properties={},
+                title=title,
+                description=description
+            )
+
+
+    def get_serializer_fields(self, path, method, view, version=None, method_func=None):
         """
         Return a list of `coreapi.Field` instances corresponding to any
         request body input, as determined by the serializer class.
@@ -281,13 +318,11 @@ class OpenApiSchemaGenerator(SchemaGenerator):
         if method not in ('PUT', 'PATCH', 'POST'):
             return []
 
-        if not hasattr(view, 'serializer_class') and not hasattr(view, 'get_serializer_class'):
+        serializer_class = self.get_serializer_class(view, method_func)
+        if not serializer_class:
             return []
 
-        serializer_class = view.get_serializer_class() if hasattr(view, 'get_serializer_class') \
-            else view.serializer_class
         serializer = serializer_class()
-
         if isinstance(serializer, serializers.ListSerializer):
             return [
                 Field(
@@ -309,11 +344,12 @@ class OpenApiSchemaGenerator(SchemaGenerator):
             required = field.required and method != 'PATCH'
             # if the attribute ('help_text') of this field is a lazy translation object, force it to generate a string
             description = str(field.help_text) if isinstance(field.help_text, Promise) else field.help_text
+            fallback_schema = self.fallback_schema_from_field(field)
             field = Field(
                 name=field.field_name,
                 location='form',
                 required=required,
-                schema=field_to_schema(field),
+                schema=fallback_schema if fallback_schema else field_to_schema(field),
                 description=description,
             )
             fields.append(field)
@@ -378,11 +414,12 @@ class OpenApiSchemaGenerator(SchemaGenerator):
                     continue
 
             # Otherwise, carry-on and use the field's schema.
+            fallback_schema = self.fallback_schema_from_field(field)
             fields.append(Field(
                 name=field.field_name,
                 location='form',
                 required=field.required,
-                schema=field_to_schema(field)
+                schema=fallback_schema if fallback_schema else field_to_schema(field),
             ))
 
         res = _get_parameters(Link(fields=fields), None)
