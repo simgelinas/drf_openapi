@@ -56,8 +56,26 @@ class OpenApiFieldParser:
 
         return parameter
 
+    def parse_object_field(self):
+        parameter = {
+            'name': self.field.name,
+            'required': self.field.required,
+            'description': self.field_description,
+            'type': self.field_type,
+            'properties': {
+                    name: {
+                        'description': _get_field_description(prop),
+                        'type': _get_field_type(prop)
+                    } for name, prop in self.field.schema.properties.items()
+                }
+        }
+
+        return parameter
+
     def as_parameter(self):
-        if self.field_type == 'array':
+        if self.field_type == 'object':
+            param = self.parse_object_field()
+        elif self.field_type == 'array':
             param = self.parse_array_field()
         else:
             param = {
@@ -82,7 +100,9 @@ class OpenApiFieldParser:
         return param
 
     def as_schema_property(self):
-        if self.field_type == 'array':
+        if self.field_type == 'object':
+            return self.parse_object_field()
+        elif self.field_type == 'array':
             return self.parse_array_field()
 
         return {
