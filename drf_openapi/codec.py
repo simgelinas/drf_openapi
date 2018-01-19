@@ -73,7 +73,7 @@ class OpenApiFieldParser:
         return parameter
 
     def as_parameter(self):
-        if self.field_type == 'object':
+        if self.field_type == 'object' and self.location_string != 'query':
             param = self.parse_object_field()
         elif self.field_type == 'array':
             param = self.parse_array_field()
