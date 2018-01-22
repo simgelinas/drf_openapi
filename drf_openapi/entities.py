@@ -14,7 +14,8 @@ from rest_framework.fields import IntegerField, URLField
 from rest_framework.pagination import PageNumberPagination, LimitOffsetPagination, CursorPagination
 from rest_framework.schemas import SchemaGenerator
 from rest_framework.schemas.generators import insert_into, distribute_links, LinkNode
-from rest_framework.schemas.inspectors import get_pk_description, field_to_schema
+from rest_framework.schemas.inspectors import get_pk_description
+from .inspectors import field_to_schema
 
 from drf_openapi.codec import _get_parameters
 
@@ -439,6 +440,9 @@ class OpenApiSchemaGenerator(SchemaGenerator):
 
         schema = res[0]['schema']
         schema['properties'].update(nested_obj)
+        if 'required' in schema:
+            schema['required'] += [nested_field_name for nested_field_name in nested_obj if
+                                   getattr(serializer.fields[nested_field_name], 'required', True) is True]
         response_schema = {
             'description': description,
             'schema': schema

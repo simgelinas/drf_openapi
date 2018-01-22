@@ -9,12 +9,55 @@ import coreschema
 from coreapi import Document
 from coreapi.compat import urlparse, force_bytes
 from openapi_codec import OpenAPICodec as _OpenAPICodec
-from openapi_codec.encode import _get_links, _get_field_description
+from openapi_codec.encode import _get_links, _get_field_description, _get_field_required
 from openapi_codec.utils import get_method, get_encoding, get_location
 from rest_framework import status
 from rest_framework.renderers import JSONRenderer
 from rest_framework_swagger.renderers import OpenAPIRenderer as _OpenAPIRenderer, \
     SwaggerUIRenderer as _SwaggerUIRenderer
+
+
+def parse_nested_field(nested_field):
+    items_type = _get_field_type(nested_field)
+
+    result = {
+        'description': _get_field_description(nested_field),
+        'type': items_type
+    }
+
+    if items_type == 'array':
+        if hasattr(nested_field, 'schema'):
+            result['items'] = {
+                'type': _get_field_type(nested_field.schema.items),
+                'properties': {
+                    name: parse_nested_field(prop) for name, prop in nested_field.schema.items.properties.items()
+                }
+            }
+            result['items']['required'] = nested_field.schema.items.required
+        elif hasattr(nested_field, 'items'):
+            result['items'] = {
+                'type': _get_field_type(nested_field.items),
+                'properties': {
+                    name: parse_nested_field(prop) for name, prop in nested_field.items.properties.items()
+                }
+            }
+            result['items']['required'] = nested_field.items.required
+    elif items_type == 'object':
+        if hasattr(nested_field, 'schema'):
+            result['properties'] = {
+                name: parse_nested_field(prop) for name, prop in nested_field.schema.properties.items()
+            }
+            result['required'] = nested_field.schema.required
+        elif hasattr(nested_field, 'properties'):
+            result['properties'] = {
+                name: parse_nested_field(prop) for name, prop in nested_field.properties.items()
+            }
+            result['required'] = nested_field.required
+
+    else:
+        if hasattr(nested_field, 'name'):
+            result['name'] = nested_field.name
+    return result
 
 
 class OpenApiFieldParser:
@@ -23,64 +66,20 @@ class OpenApiFieldParser:
         self.field = field
         self.field_description = _get_field_description(field)
         self.field_type = _get_field_type(field)
+        self.field_required = _get_field_required(field)
         self.location = get_location(link, field)
 
     @property
     def location_string(self):
         return 'formData' if self.location == 'form' else self.location
 
-    def parse_array_field(self):
-        parameter = {
-            'name': self.field.name,
-            'required': self.field.required,
-            'description': self.field_description,
-            'type': self.field_type,
-        }
-
-        items_type = _get_field_type(self.field.schema.items)
-        if items_type == 'object':
-            parameter['items'] = {
-                'type': items_type,
-                'properties': {
-                    name: {
-                        'description': _get_field_description(prop),
-                        'type': _get_field_type(prop)
-                    } for name, prop in self.field.schema.items.properties.items()
-                }
-            }
-        else:
-            parameter['items'] = {
-                'type': items_type,
-                'description': _get_field_description(self.field.schema.items)
-            }
-
-        return parameter
-
-    def parse_object_field(self):
-        parameter = {
-            'name': self.field.name,
-            'required': self.field.required,
-            'description': self.field_description,
-            'type': self.field_type,
-            'properties': {
-                    name: {
-                        'description': _get_field_description(prop),
-                        'type': _get_field_type(prop)
-                    } for name, prop in self.field.schema.properties.items()
-                }
-        }
-
-        return parameter
-
     def as_parameter(self):
-        if self.field_type == 'object' and self.location_string != 'query':
-            param = self.parse_object_field()
-        elif self.field_type == 'array':
-            param = self.parse_array_field()
+        if (self.field_type == 'object' and self.location_string != 'query') or self.field_type == 'array':
+            param = parse_nested_field(self.field)
         else:
             param = {
                 'name': self.field.name,
-                'required': self.field.required,
+                'required': self.field_required,
                 'description': self.field_description,
                 'type': self.field_type
             }
@@ -100,14 +99,13 @@ class OpenApiFieldParser:
         return param
 
     def as_schema_property(self):
-        if self.field_type == 'object':
-            return self.parse_object_field()
-        elif self.field_type == 'array':
-            return self.parse_array_field()
+        if self.field_type in ('object', 'array'):
+            return parse_nested_field(self.field)
 
         return {
             'description': self.field_description,
             'type': self.field_type,
+            'required': self.field_required,
         }
 
 
