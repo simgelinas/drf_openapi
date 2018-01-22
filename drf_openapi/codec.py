@@ -31,21 +31,16 @@ def parse_nested_field(nested_field):
 
     if items_type == 'array':
         if hasattr(nested_field, 'schema'):
-            result['items'] = {
-                'type': _get_field_type(nested_field.schema.items),
-                'properties': {
-                    name: parse_nested_field(prop) for name, prop in nested_field.schema.items.properties.items()
-                }
-            }
-            result['items']['required'] = nested_field.schema.items.required
-        elif hasattr(nested_field, 'items'):
-            result['items'] = {
-                'type': _get_field_type(nested_field.items),
-                'properties': {
-                    name: parse_nested_field(prop) for name, prop in nested_field.items.properties.items()
-                }
-            }
-            result['items']['required'] = nested_field.items.required
+            items = nested_field.schema.items
+        else:
+            items = nested_field.items
+
+        result['items'] = {'type': _get_field_type(items)}
+        if hasattr(items, 'properties'):
+            result['items']['properties'] = {name: parse_nested_field(prop) for name, prop in items.properties.items()}
+            result['items']['required'] = items.required
+        # else:
+        #     result['items']['properties'] = {nested_field.name: parse_nested_field(items)}
     elif items_type == 'object':
         if hasattr(nested_field, 'schema'):
             result['properties'] = {
