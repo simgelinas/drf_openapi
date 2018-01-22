@@ -9,12 +9,16 @@ import coreschema
 from coreapi import Document
 from coreapi.compat import urlparse, force_bytes
 from openapi_codec import OpenAPICodec as _OpenAPICodec
-from openapi_codec.encode import _get_links, _get_field_description, _get_field_required
+from openapi_codec.encode import _get_links, _get_field_description
 from openapi_codec.utils import get_method, get_encoding, get_location
 from rest_framework import status
 from rest_framework.renderers import JSONRenderer
 from rest_framework_swagger.renderers import OpenAPIRenderer as _OpenAPIRenderer, \
     SwaggerUIRenderer as _SwaggerUIRenderer
+
+
+def _get_field_required(field):
+    return getattr(field, 'required', True)
 
 
 def parse_nested_field(nested_field):
