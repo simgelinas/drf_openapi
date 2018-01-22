@@ -9,7 +9,19 @@ def field_to_schema(field):
     description = force_text(field.help_text) if field.help_text else ''
 
     if isinstance(field, (serializers.ListSerializer, serializers.ListField)):
-        child_schema = field_to_schema(field.child)
+        # If it's a nested list of lists - find the nested non-list object
+        if isinstance(field.child.__class__(), (serializers.ListSerializer, serializers.ListField)):
+            array_dimensions = 2
+            child_class = field.child.__class__()
+            while isinstance(child_class.child.__class__(),
+                             (serializers.ListSerializer, serializers.ListField)):
+                array_dimensions += 1
+                child_class = child_class.child.__class__()
+
+            description = '{}D Array '.format(array_dimensions) + description
+            child_schema = field_to_schema(child_class.child)
+        else:
+            child_schema = field_to_schema(field.child)
         return coreschema.Array(
             items=child_schema,
             title=title,

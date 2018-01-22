@@ -384,37 +384,6 @@ class OpenApiSchemaGenerator(SchemaGenerator):
                     nested_obj[field.field_name]['description'] = field.help_text
                     continue
 
-            # If the field is a list
-            elif isinstance(field, (serializers.ListSerializer, serializers.ListField)):
-                # And if the child is a serializer
-                if isinstance(field.child.__class__(), serializers.Serializer):
-                    subfield_schema = self.get_response_object(field.child.__class__, None)[0].get('schema')
-
-                    # If the schema exists, use it as the nested_obj
-                    if subfield_schema is not None:
-                        nested_obj[field.field_name] = subfield_schema
-                        nested_obj[field.field_name]['description'] = '[ Array of objects ]' + (
-                            ', ' + field.help_text if field.help_text is not None else '')
-                        continue
-
-                # Support for multi-dimensional arrays
-                elif isinstance(field.child.__class__(), (serializers.ListSerializer, serializers.ListField)):
-                    array_dimensions = 2
-                    child_class = field.child.__class__()
-                    while isinstance(child_class.child.__class__(),
-                                     (serializers.ListSerializer, serializers.ListField)):
-                        array_dimensions += 1
-                        child_class = child_class.child.__class__()
-
-                    fields.append(Field(
-                        name=field.field_name,
-                        location='form',
-                        required=field.required,
-                        schema=field_to_schema(child_class),  # innermost child type (as all other are nested lists)
-                        description='{}D Array'.format(array_dimensions)
-                    ))
-                    continue
-
             # Otherwise, carry-on and use the field's schema.
             fallback_schema = self.fallback_schema_from_field(field)
             fields.append(Field(
