@@ -39,6 +39,9 @@ def parse_nested_field(nested_field):
         if hasattr(items, 'properties'):
             result['items']['properties'] = {name: parse_nested_field(prop) for name, prop in items.properties.items()}
             result['items']['required'] = items.required
+        if result['items']['type'] == 'enum':
+            result['items']['type'] = 'string'
+            result['items']['enum'] = items.enum
         # else:
         #     result['items']['properties'] = {nested_field.name: parse_nested_field(items)}
     elif items_type == 'object':
