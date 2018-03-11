@@ -52,6 +52,9 @@ def parse_nested_field(nested_field):
                 name: parse_nested_field(prop) for name, prop in nested_field.properties.items()
             }
             result['required'] = nested_field.required
+    elif items_type == 'enum':
+        result['type'] = 'string'
+        result['enum'] = nested_field.enum
 
     else:
         if hasattr(nested_field, 'name'):
@@ -75,6 +78,15 @@ class OpenApiFieldParser:
     def as_parameter(self):
         if (self.field_type == 'object' and self.location_string != 'query') or self.field_type == 'array':
             param = parse_nested_field(self.field)
+        elif self.field_type  == 'enum':
+            # CoreApi and OpenApi don't handle Enum the same way (field property vs field type)
+            param = {
+                'name': self.field.name,
+                'required': self.field_required,
+                'description': self.field_description,
+                'type': 'string',
+                'enum': self.field.schema.enum,
+            }
         else:
             param = {
                 'name': self.field.name,
@@ -100,7 +112,13 @@ class OpenApiFieldParser:
     def as_schema_property(self):
         if self.field_type in ('object', 'array'):
             return parse_nested_field(self.field)
-
+        elif self.field_type == 'enum':
+            return {
+                'description': self.field_description,
+                'type': 'string',
+                'enum': self.field.schema.enum,
+                'required': self.field_required,
+            }
         return {
             'description': self.field_description,
             'type': self.field_type,
@@ -215,6 +233,7 @@ def _get_field_type(field):
         coreschema.Boolean: 'boolean',
         coreschema.Array: 'array',
         coreschema.Object: 'object',
+        coreschema.Enum: 'enum',
     }
 
     if getattr(field, 'type', None) is not None:
