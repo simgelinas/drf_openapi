@@ -18,7 +18,7 @@ def field_to_schema(field):
                 array_dimensions += 1
                 child_class = child_class.child.__class__()
 
-            description = '{}D Array '.format(array_dimensions) + description
+            description = '{}D Array'.format(array_dimensions) + description
             child_schema = field_to_schema(child_class.child)
         else:
             child_schema = field_to_schema(field.child)
