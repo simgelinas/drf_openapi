@@ -43,6 +43,8 @@ def field_to_schema(field):
         return coreschema.Object(title=title,
                           description=description,
                           additional_properties=field_to_schema(field.child))
+    elif isinstance(field, serializers.SerializerMethodField) and hasattr(field, 'method_output_type'):
+        return field_to_schema(field.method_output_type)
     elif isinstance(field, serializers.ManyRelatedField):
         return coreschema.Array(
             items=coreschema.String(),
