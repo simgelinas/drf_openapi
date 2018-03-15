@@ -39,6 +39,10 @@ def field_to_schema(field):
             title=title,
             description=description
         )
+    elif isinstance(field, serializers.DictField):
+        return coreschema.Object(title=title,
+                          description=description,
+                          additional_properties=field_to_schema(field.child))
     elif isinstance(field, serializers.ManyRelatedField):
         return coreschema.Array(
             items=coreschema.String(),

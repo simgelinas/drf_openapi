@@ -46,10 +46,13 @@ def parse_nested_field(nested_field):
         #     result['items']['properties'] = {nested_field.name: parse_nested_field(items)}
     elif items_type == 'object':
         if hasattr(nested_field, 'schema'):
-            result['properties'] = {
-                name: parse_nested_field(prop) for name, prop in nested_field.schema.properties.items()
-            }
-            result['required'] = nested_field.schema.required
+            if (nested_field.schema.properties is None) and not isinstance(nested_field.schema.additional_properties_schema, coreschema.Anything):
+                result['additionalProperties'] = {'type': _get_field_type(nested_field.schema.additional_properties_schema)}
+            else:
+                result['properties'] = {
+                    name: parse_nested_field(prop) for name, prop in nested_field.schema.properties.items()
+                }
+                result['required'] = nested_field.schema.required
         elif hasattr(nested_field, 'properties'):
             result['properties'] = {
                 name: parse_nested_field(prop) for name, prop in nested_field.properties.items()
