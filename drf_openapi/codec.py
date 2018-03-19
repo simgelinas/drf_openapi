@@ -32,6 +32,12 @@ def _get_field_required(field):
     return getattr(field, 'required', True)
 
 
+def _is_dict_field(d):
+    if (d.properties is None) and not isinstance(d.additional_properties_schema, coreschema.Anything):
+        return True
+    return False
+
+
 def parse_nested_field(nested_field):
     items_type = _get_field_type(nested_field)
 
@@ -46,27 +52,46 @@ def parse_nested_field(nested_field):
         else:
             items = nested_field.items
 
-        result['items'] = {'type': _get_field_type(items)}
-        if result['items']['type'] == 'ref':
+        type = _get_field_type(items)
+
+        if type == 'ref':
             result['items'] = {'$ref': '#/definitions/%s' % items.ref_name}
         else:
+            result['items']['type'] = type
             if hasattr(items, 'properties'):
-                result['items']['properties'] = {name: parse_nested_field(prop) for name, prop in items.properties.items()}
-                result['items']['required'] = items.required
-            if result['items']['type'] == 'enum':
+                if _is_dict_field(items):
+                    result['additionalProperties'] = {
+                        'type': _get_field_type(items.additional_properties_schema)
+                    }
+                else:
+                    result['items']['properties'] = {
+                        name: parse_nested_field(prop) for name, prop in items.properties.items()
+                    }
+                    result['items']['required'] = items.required
+            if type == 'enum':
                 result['items']['type'] = 'string'
                 result['items']['enum'] = items.enum
     elif items_type == 'object':
         if hasattr(nested_field, 'schema'):
-            result['properties'] = {
-                name: parse_nested_field(prop) for name, prop in nested_field.schema.properties.items()
-            }
-            result['required'] = nested_field.schema.required
+            if _is_dict_field(nested_field.schema):
+                result['additionalProperties'] = {
+                    'type': _get_field_type(nested_field.schema.additional_properties_schema)
+                }
+            else:
+                result['properties'] = {
+                    name: parse_nested_field(prop) for name, prop in nested_field.schema.properties.items()
+                }
+                result['required'] = nested_field.schema.required
         elif hasattr(nested_field, 'properties'):
-            result['properties'] = {
-                name: parse_nested_field(prop) for name, prop in nested_field.properties.items()
-            }
-            result['required'] = nested_field.required
+            if _is_dict_field(nested_field):
+                result['additionalProperties'] = {
+                    'type': _get_field_type(nested_field.additional_properties_schema)
+                }
+            else:
+                result['properties'] = {
+                    name: parse_nested_field(prop) for name, prop in nested_field.properties.items()
+                }
+                result['required'] = nested_field.required
     elif items_type == 'enum':
         result['type'] = 'string'
         result['enum'] = nested_field.enum
