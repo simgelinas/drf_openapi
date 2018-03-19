@@ -57,7 +57,7 @@ def parse_nested_field(nested_field):
         if type == 'ref':
             result['items'] = {'$ref': '#/definitions/%s' % items.ref_name}
         else:
-            result['items']['type'] = type
+            result['items'] = {'type': type}
             if hasattr(items, 'properties'):
                 if _is_dict_field(items):
                     result['additionalProperties'] = {

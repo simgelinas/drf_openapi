@@ -307,7 +307,7 @@ class OpenApiSchemaGenerator(SchemaGenerator):
 
         # since we can't really inspect dictfield and jsonfield, at least display object as type
         # instead of string
-        if isinstance(field, (serializers.DictField, serializers.JSONField)):
+        if isinstance(field, serializers.JSONField):
             return coreschema.Object(
                 properties={},
                 title=title,
