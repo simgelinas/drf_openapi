@@ -22,13 +22,11 @@ def _get_field_description(field):
         # Deprecated
         return field.description
 
-    try:
-        if not hasattr(field, 'schema') or field.schema is None or not hasattr(field.schema, 'description'):
-            return ''
-    except:
-        print('yo')
+    if not hasattr(field, 'schema') or field.schema is None or not hasattr(field.schema, 'description'):
+        return ''
 
     return field.schema.description
+
 
 def _get_field_required(field):
     return getattr(field, 'required', True)
