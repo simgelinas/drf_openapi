@@ -94,8 +94,8 @@ class OpenApiSchemaGenerator(SchemaGenerator):
         if self.endpoints is None:
             inspector = self.endpoint_inspector_cls(self.patterns, self.urlconf)
             self.endpoints = inspector.get_api_endpoints()
-
-        links = self.get_links(None if public else request)
+        definitions = {}
+        links = self.get_links(definitions, None if public else request)
         if not links:
             return None
 
@@ -106,11 +106,14 @@ class OpenApiSchemaGenerator(SchemaGenerator):
         distribute_links(links)
         return OpenApiDocument(
             version=self.version,
-            title=self.title, description=self.description,
-            url=url, content=links
+            title=self.title,
+            description=self.description,
+            url=url,
+            content=links,
+            definitions=definitions,
         )
 
-    def get_links(self, request=None):
+    def get_links(self, definitions, request=None):
         """
         Return a dictionary containing all the links that should be
         included in the API schema.
@@ -136,13 +139,14 @@ class OpenApiSchemaGenerator(SchemaGenerator):
         for path, method, view in view_endpoints:
             if not self.has_view_permissions(path, method, view):
                 continue
-            link = self.get_link(path, method, view, version=getattr(request, 'version', None))
+            link = self.get_link(path, method, view, definitions, version=getattr(request, 'version', None))
             subpath = path[len(prefix):]
             keys = self.get_keys(subpath, method, view)
             try:
                 insert_into(links, keys, link)
             except Exception:
                 continue
+
         return links
 
     def get_serializer_doc(self, serializer):
@@ -154,12 +158,12 @@ class OpenApiSchemaGenerator(SchemaGenerator):
             doc.append(line.strip())
         return '\n'.join(doc)
 
-    def get_link(self, path, method, view, version=None):
+    def get_link(self, path, method, view, definitions, version=None):
         method_name = getattr(view, 'action', method.lower())
         method_func = getattr(view, method_name, None)
 
         fields = self.get_path_fields(path, method, view)
-        fields += self.get_serializer_fields(path, method, view, version=version, method_func=method_func)
+        fields += self.get_serializer_fields(method, view, definitions, method_func=method_func)
         fields += view.schema.get_pagination_fields(path, method)
         fields += view.schema.get_filter_fields(path, method)
 
@@ -192,7 +196,7 @@ class OpenApiSchemaGenerator(SchemaGenerator):
                 response_serializer_class = self.get_paginator_serializer(
                     view, response_serializer_class)
         response_schema, error_status_codes = self.get_response_object(
-            response_serializer_class, method_func.__doc__) if response_serializer_class else ({}, {})
+            response_serializer_class, method_func.__doc__, definitions) if response_serializer_class else ({}, {})
 
         return OpenApiLink(
             response_schema=response_schema,
@@ -303,14 +307,14 @@ class OpenApiSchemaGenerator(SchemaGenerator):
 
         # since we can't really inspect dictfield and jsonfield, at least display object as type
         # instead of string
-        if isinstance(field, (serializers.JSONField)):
+        if isinstance(field, (serializers.DictField, serializers.JSONField)):
             return coreschema.Object(
                 properties={},
                 title=title,
                 description=description
             )
 
-    def get_serializer_fields(self, path, method, view, version=None, method_func=None):
+    def get_serializer_fields(self, method, view, definitions, method_func=None):
         """
         Return a list of `coreapi.Field` instances corresponding to any
         request body input, as determined by the serializer class.
@@ -325,85 +329,51 @@ class OpenApiSchemaGenerator(SchemaGenerator):
             return []
 
         serializer = serializer_class()
-        if isinstance(serializer, serializers.ListSerializer):
+        if isinstance(serializer, (serializers.ListSerializer, serializers.ListField)):
             return [
                 Field(
                     name='data',
                     location=location,
                     required=True,
-                    schema=coreschema.Array()
+                    schema=coreschema.Array(items=field_to_schema(serializer, definitions))
+                )
+            ]
+        else:
+            return [
+                Field(
+                    name='data',
+                    location=location,
+                    required=True,
+                    schema=field_to_schema(serializer, definitions))
+            ]
+
+    def get_response_object(self, response_serializer_class, description, definitions):
+
+        serializer = response_serializer_class()
+
+        if isinstance(serializer, (serializers.ListSerializer, serializers.ListField)):
+            fields = [
+                Field(
+                    name='data',
+                    location='form',
+                    required=True,
+                    schema=coreschema.Array(items=field_to_schema(serializer, definitions)),
+                    description=description
+                )
+            ]
+        else:
+            fields = [
+                Field(
+                    name='data',
+                    location='form',
+                    required=True,
+                    schema=field_to_schema(serializer, definitions),
+                    description=description
                 )
             ]
 
-        if not isinstance(serializer, serializers.Serializer):
-            return []
-
-        fields = []
-        for field in serializer.fields.values():
-            if field.read_only or isinstance(field, serializers.HiddenField):
-                continue
-
-            required = field.required and method != 'PATCH'
-            # if the attribute ('help_text') of this field is a lazy translation object, force it to generate a string
-            description = str(field.help_text) if isinstance(field.help_text, Promise) else field.help_text
-            fallback_schema = self.fallback_schema_from_field(field)
-            field = Field(
-                name=field.field_name,
-                location=location,
-                required=required,
-                schema=fallback_schema if fallback_schema else field_to_schema(field),
-                description=description,
-            )
-            fields.append(field)
-
-        return fields
-
-    def get_response_object(self, response_serializer_class, description):
-
-        fields = []
-        serializer = response_serializer_class()
-        nested_obj = {}
-
-        for field in serializer.fields.values():
-
-            # If field is a serializer, attempt to get its schema.
-            if isinstance(field, serializers.Serializer):
-                subfield_schema = self.get_response_object(field.__class__, None)[0].get('schema')
-
-                # If the schema exists, use it as the nested_obj
-                if subfield_schema is not None:
-                    nested_obj[field.field_name] = subfield_schema
-                    nested_obj[field.field_name]['description'] = field.help_text
-                    continue
-
-            # Otherwise, carry-on and use the field's schema.
-            fallback_schema = self.fallback_schema_from_field(field)
-            fields.append(Field(
-                name=field.field_name,
-                location='form',
-                required=field.required,
-                schema=fallback_schema if fallback_schema else field_to_schema(field),
-            ))
-
         res = _get_parameters(Link(fields=fields), None)
-
-        if not res:
-            if nested_obj:
-                return {
-                           'description': description,
-                           'schema': {
-                               'type': 'object',
-                               'properties': nested_obj
-                           }
-                       }, {}
-            else:
-                return {}, {}
-
         schema = res[0]['schema']
-        schema['properties'].update(nested_obj)
-        if 'required' in schema:
-            schema['required'] += [nested_field_name for nested_field_name in nested_obj if
-                                   getattr(serializer.fields[nested_field_name], 'required', True) is True]
         response_schema = {
             'description': description,
             'schema': schema
@@ -424,7 +394,7 @@ class OpenApiDocument(Document):
     - Versioning information
     """
 
-    def __init__(self, version, url=None, title=None, description=None, media_type=None, content=None):
+    def __init__(self, version, url=None, title=None, description=None, media_type=None, content=None, definitions=None):
         super(OpenApiDocument, self).__init__(
             url=url,
             title=title,
@@ -433,10 +403,15 @@ class OpenApiDocument(Document):
             content=content
         )
         self._version = version
+        self._definitions = definitions
 
     @property
     def version(self):
         return self._version
+
+    @property
+    def definitions(self):
+        return self._definitions
 
 
 class OpenApiLink(Link):

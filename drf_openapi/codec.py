@@ -9,13 +9,26 @@ import coreschema
 from coreapi import Document
 from coreapi.compat import urlparse, force_bytes
 from openapi_codec import OpenAPICodec as _OpenAPICodec
-from openapi_codec.encode import _get_links, _get_field_description
+from openapi_codec.encode import _get_links
 from openapi_codec.utils import get_method, get_encoding, get_location
 from rest_framework import status
 from rest_framework.renderers import JSONRenderer
 from rest_framework_swagger.renderers import OpenAPIRenderer as _OpenAPIRenderer, \
     SwaggerUIRenderer as _SwaggerUIRenderer
 
+
+def _get_field_description(field):
+    if getattr(field, 'description', None) is not None:
+        # Deprecated
+        return field.description
+
+    try:
+        if not hasattr(field, 'schema') or field.schema is None or not hasattr(field.schema, 'description'):
+            return ''
+    except:
+        print('yo')
+
+    return field.schema.description
 
 def _get_field_required(field):
     return getattr(field, 'required', True)
@@ -36,47 +49,35 @@ def parse_nested_field(nested_field):
             items = nested_field.items
 
         result['items'] = {'type': _get_field_type(items)}
-        if hasattr(items, 'properties'):
-            if _is_dict_field(items):
-                result['additionalProperties'] = {'type': _get_field_type(items.additional_properties_schema)}
-            else:
+        if result['items']['type'] == 'ref':
+            result['items'] = {'$ref': '#/definitions/%s' % items.ref_name}
+        else:
+            if hasattr(items, 'properties'):
                 result['items']['properties'] = {name: parse_nested_field(prop) for name, prop in items.properties.items()}
                 result['items']['required'] = items.required
-        if result['items']['type'] == 'enum':
-            result['items']['type'] = 'string'
-            result['items']['enum'] = items.enum
-        # else:
-        #     result['items']['properties'] = {nested_field.name: parse_nested_field(items)}
+            if result['items']['type'] == 'enum':
+                result['items']['type'] = 'string'
+                result['items']['enum'] = items.enum
     elif items_type == 'object':
         if hasattr(nested_field, 'schema'):
-            if _is_dict_field(nested_field.schema):
-                result['additionalProperties'] = {'type': _get_field_type(nested_field.schema.additional_properties_schema)}
-            else:
-                result['properties'] = {
-                    name: parse_nested_field(prop) for name, prop in nested_field.schema.properties.items()
-                }
-                result['required'] = nested_field.schema.required
+            result['properties'] = {
+                name: parse_nested_field(prop) for name, prop in nested_field.schema.properties.items()
+            }
+            result['required'] = nested_field.schema.required
         elif hasattr(nested_field, 'properties'):
-            if _is_dict_field(nested_field):
-                result['additionalProperties'] = {'type': _get_field_type(nested_field.additional_properties_schema)}
-            else:
-                result['properties'] = {
-                    name: parse_nested_field(prop) for name, prop in nested_field.properties.items()
-                }
-                result['required'] = nested_field.required
+            result['properties'] = {
+                name: parse_nested_field(prop) for name, prop in nested_field.properties.items()
+            }
+            result['required'] = nested_field.required
     elif items_type == 'enum':
         result['type'] = 'string'
         result['enum'] = nested_field.enum
-
+    elif items_type == 'ref':
+        result = {'$ref': '#/definitions/%s' % nested_field.ref_name}
     else:
         if hasattr(nested_field, 'name'):
             result['name'] = nested_field.name
     return result
-
-def _is_dict_field(d):
-    if (d.properties is None) and not isinstance(d.additional_properties_schema, coreschema.Anything):
-        return True
-    return False
 
 
 class OpenApiFieldParser:
@@ -93,7 +94,9 @@ class OpenApiFieldParser:
         return 'formData' if self.location == 'form' else self.location
 
     def as_parameter(self):
-        if (self.field_type == 'object' and self.location_string != 'query') or self.field_type == 'array':
+        if self.field_type == 'ref':
+            return {'$ref': '#/definitions/%s' % self.field.schema.ref_name}
+        elif (self.field_type == 'object' and self.location_string != 'query') or self.field_type == 'array':
             param = parse_nested_field(self.field)
         elif self.field_type  == 'enum':
             # CoreApi and OpenApi don't handle Enum the same way (field property vs field type)
@@ -127,7 +130,11 @@ class OpenApiFieldParser:
         return param
 
     def as_schema_property(self):
-        if self.field_type in ('object', 'array'):
+        if self.field_type == 'ref':
+            return {
+                '$ref': '#definitions/%s' % self.field.schema.ref_name
+            }
+        elif self.field_type in ('object', 'array'):
             return parse_nested_field(self.field)
         elif self.field_type == 'enum':
             return {
@@ -188,6 +195,7 @@ def _generate_openapi_object(document):
     if parsed_url.scheme:
         swagger['schemes'] = [parsed_url.scheme]
 
+    swagger['definitions'] = _get_definitions(document)
     swagger['paths'] = _get_paths_object(document)
 
     return swagger
@@ -207,6 +215,15 @@ def _get_paths_object(document):
         paths[link.url].update({method: operation})
 
     return paths
+
+def _get_definitions(document):
+    """
+    Returns dictionary with schema definitions.
+    """
+    definitions = OrderedDict()
+    for def_key, def_data in document.definitions.iteritems():
+        definitions[def_key] = parse_nested_field(def_data)
+    return definitions
 
 
 def _get_operation(operation_id, link, tags):
@@ -251,6 +268,7 @@ def _get_field_type(field):
         coreschema.Array: 'array',
         coreschema.Object: 'object',
         coreschema.Enum: 'enum',
+        coreschema.Ref: 'ref',
     }
 
     if getattr(field, 'type', None) is not None:
@@ -274,34 +292,46 @@ def _get_parameters(link, encoding):
     properties = {}
     required = []
 
-    for field in link.fields:
-        parser = OpenApiFieldParser(link, field)
-        if parser.location == 'form':
-            if encoding in ('multipart/form-data', 'application/x-www-form-urlencoded'):
-                # 'formData' in swagger MUST be one of these media types.
-                parameters.append(parser.as_parameter())
-            else:
-                # Expand coreapi fields with location='form' into a single swagger
-                # parameter, with a schema containing multiple properties.
-                properties[field.name] = parser.as_schema_property()
-                if field.required:
-                    required.append(field.name)
-        elif parser.location == 'body':
-            parameters.append(parser.as_body_parameter(encoding))
-        else:
-            parameters.append(parser.as_parameter())
-
-    if properties:
+    if len(link.fields) == 1 and _get_field_type(link.fields[0]) == 'ref':
         parameter = {
             'name': 'data',
             'in': 'body',
-            'schema': {
-                'type': 'object',
-                'properties': properties
-            }
+            'schema': OpenApiFieldParser(link, link.fields[0]).as_body_parameter(encoding)
         }
         if required:
             parameter['schema']['required'] = required
         parameters.append(parameter)
+    else:
+        for field in link.fields:
+            parser = OpenApiFieldParser(link, field)
+            if parser.location == 'form':
+                if encoding in ('multipart/form-data', 'application/x-www-form-urlencoded'):
+                    # 'formData' in swagger MUST be one of these media types.
+                    parameters.append(parser.as_parameter())
+                else:
+                    # Expand coreapi fields with location='form' into a single swagger
+                    # parameter, with a schema containing multiple properties.
+                    properties[field.name] = parser.as_schema_property()
+                    if field.required:
+                        required.append(field.name)
+            elif parser.location == 'body':
+                parameters.append(parser.as_body_parameter(encoding))
+            else:
+                parameters.append(parser.as_parameter())
+
+
+        if properties:
+            parameter = {
+                'name': 'data',
+                'in': 'body',
+                'schema': {
+                    'type': 'object',
+                    'properties': properties
+                }
+            }
+            if required:
+                parameter['schema']['required'] = required
+
+            parameters.append(parameter)
 
     return parameters

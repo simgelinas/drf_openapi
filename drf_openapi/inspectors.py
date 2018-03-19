@@ -4,7 +4,13 @@ from rest_framework import serializers
 from collections import OrderedDict
 
 
-def field_to_schema(field):
+def create_ref(field, definitions):
+    name = '_'.join([field.__class__.__module__.replace('.', '_'), field.__class__.__name__])
+    definitions[name] = field_to_schema(field, definitions, force_create_field=True)
+
+    return name
+
+def field_to_schema(field, definitions, force_create_field=False):
     title = force_text(field.label) if field.label else ''
     description = force_text(field.help_text) if field.help_text else ''
 
@@ -19,32 +25,29 @@ def field_to_schema(field):
                 child_class = child_class.child.__class__()
 
             description = '{}D Array'.format(array_dimensions) + description
-            child_schema = field_to_schema(child_class.child)
+            child_schema = field_to_schema(child_class.child, definitions)
         else:
-            child_schema = field_to_schema(field.child)
+            child_schema = field_to_schema(field.child, definitions)
         return coreschema.Array(
             items=child_schema,
             title=title,
             description=description
         )
     elif isinstance(field, serializers.Serializer):
-        return coreschema.Object(
-            properties=OrderedDict([
-                (key, field_to_schema(value))
-                for key, value
-                in field.fields.items()
-            ]),
-            required=[field_name for field_name, field_data in field.fields.items() if
-                      getattr(field_data, 'required', True) is True],
-            title=title,
-            description=description
-        )
-    elif isinstance(field, serializers.DictField):
-        return coreschema.Object(title=title,
-                          description=description,
-                          additional_properties=field_to_schema(field.child))
-    elif isinstance(field, serializers.SerializerMethodField) and hasattr(field, 'method_output_type'):
-        return field_to_schema(field.method_output_type)
+        if not force_create_field:
+            return coreschema.Ref(create_ref(field, definitions))
+        else:
+            return coreschema.Object(
+                properties=OrderedDict([
+                    (key, field_to_schema(value, definitions))
+                    for key, value
+                    in field.fields.items()
+                ]),
+                required=[field_name for field_name, field_data in field.fields.items() if
+                          getattr(field_data, 'required', True) is True],
+                title=title,
+                description=description
+            )
     elif isinstance(field, serializers.ManyRelatedField):
         return coreschema.Array(
             items=coreschema.String(),
