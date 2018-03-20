@@ -315,46 +315,46 @@ def _get_parameters(link, encoding):
     properties = {}
     required = []
 
-    if len(link.fields) == 1 and _get_field_type(link.fields[0]) == 'ref':
+    fields_and_parser = [(field, OpenApiFieldParser(link, field)) for field in link.fields]
+    form_fields = [f for f in fields_and_parser if f[1].location == 'form']
+    body_fields = [f for f in fields_and_parser if f[1].location == 'body']
+    query_param_fields = [f for f in fields_and_parser if f[1].location not in ('form', 'body')]
+
+    if len(form_fields) == 1 and form_fields[0][1].field_type == 'ref':
+        parameters.append({
+            'name': 'data',
+            'in': 'body',
+            'schema': form_fields[0][1].as_parameter()
+        })
+    else:
+        for field, parser in form_fields:
+            if encoding in ('multipart/form-data', 'application/x-www-form-urlencoded'):
+                # 'formData' in swagger MUST be one of these media types.
+                parameters.append(parser.as_parameter())
+            else:
+                # Expand coreapi fields with location='form' into a single swagger
+                # parameter, with a schema containing multiple properties.
+                properties[field.name] = parser.as_schema_property()
+                if field.required:
+                    required.append(field.name)
+
+    for _, parser in body_fields:
+        parameters.append(parser.as_body_parameter(encoding))
+    for _, parser in query_param_fields:
+        parameters.append(parser.as_parameter())
+
+    if properties:
         parameter = {
             'name': 'data',
             'in': 'body',
-            'schema': OpenApiFieldParser(link, link.fields[0]).as_body_parameter(encoding)
+            'schema': {
+                'type': 'object',
+                'properties': properties
+            }
         }
         if required:
             parameter['schema']['required'] = required
+
         parameters.append(parameter)
-    else:
-        for field in link.fields:
-            parser = OpenApiFieldParser(link, field)
-            if parser.location == 'form':
-                if encoding in ('multipart/form-data', 'application/x-www-form-urlencoded'):
-                    # 'formData' in swagger MUST be one of these media types.
-                    parameters.append(parser.as_parameter())
-                else:
-                    # Expand coreapi fields with location='form' into a single swagger
-                    # parameter, with a schema containing multiple properties.
-                    properties[field.name] = parser.as_schema_property()
-                    if field.required:
-                        required.append(field.name)
-            elif parser.location == 'body':
-                parameters.append(parser.as_body_parameter(encoding))
-            else:
-                parameters.append(parser.as_parameter())
-
-
-        if properties:
-            parameter = {
-                'name': 'data',
-                'in': 'body',
-                'schema': {
-                    'type': 'object',
-                    'properties': properties
-                }
-            }
-            if required:
-                parameter['schema']['required'] = required
-
-            parameters.append(parameter)
 
     return parameters
