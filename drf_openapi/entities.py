@@ -3,6 +3,7 @@ import operator
 from collections import OrderedDict
 
 import coreschema
+import re
 import uritemplate
 from coreapi import Link, Document, Field
 from coreapi.compat import force_text
@@ -16,7 +17,7 @@ from rest_framework.schemas.generators import insert_into, distribute_links, Lin
 from rest_framework.schemas.inspectors import get_pk_description
 
 from codec import _get_parameters
-from inspectors import field_to_schema
+from inspectors import field_to_schema, Definition
 
 
 class VersionedSerializers:
@@ -190,7 +191,7 @@ class OpenApiSchemaGenerator(SchemaGenerator):
                 description = description + '\n\n**Request Description:**\n' + request_doc
 
         fields = self.get_path_fields(path, method, view)
-        fields += self.get_serializer_fields(method, view, definitions, method_func=method_func)
+        fields += self.get_serializer_fields(method, view, definitions, path, method_func)
         fields += view.schema.get_pagination_fields(path, method)
         fields += view.schema.get_filter_fields(path, method)
 
@@ -204,7 +205,7 @@ class OpenApiSchemaGenerator(SchemaGenerator):
         if res_class_description:
             description += res_class_description
         if response_serializer_class:
-            response_schema, error_status_codes = self.get_response_object(response_serializer_class, method_func.__doc__, definitions)
+            response_schema, error_status_codes = self.get_response_object(response_serializer_class, method_func.__doc__, definitions, path, method)
         else:
             response_schema, error_status_codes = ({}, {})
 
@@ -324,15 +325,25 @@ class OpenApiSchemaGenerator(SchemaGenerator):
                 description=description
             )
 
-    def _get_serializer_fields(self, serializer_class, location, definitions):
+    def _get_serializer_fields(self, serializer_class, location, definitions, path, suffix):
         serializer = serializer_class()
+
+        schema_field = field_to_schema(serializer, definitions, False)
+        if not isinstance(schema_field, coreschema.Ref):
+            p = [re.sub('\W+', '', i).title() for i in path.split('/') if i]
+            p.append(suffix)
+            new_ref_name = ''.join(p)
+            while new_ref_name in definitions:
+                new_ref_name += '_1'
+            definitions[new_ref_name] = Definition(schema_field, [])
+            schema_field = coreschema.Ref(new_ref_name)
         if isinstance(serializer, (serializers.ListSerializer, serializers.ListField)):
             return [
                 Field(
                     name='data',
                     location=location,
                     required=True,
-                    schema=coreschema.Array(items=field_to_schema(serializer, definitions, False))
+                    schema=coreschema.Array(items=schema_field)
                 )
             ]
         else:
@@ -341,10 +352,10 @@ class OpenApiSchemaGenerator(SchemaGenerator):
                     name='data',
                     location=location,
                     required=True,
-                    schema=field_to_schema(serializer, definitions, False))
+                    schema=schema_field)
             ]
 
-    def get_serializer_fields(self, method, view, definitions, method_func=None):
+    def get_serializer_fields(self, method, view, definitions, path, method_func):
         """
         Return a list of `coreapi.Field` instances corresponding to any
         request body input, as determined by the serializer class.
@@ -358,11 +369,10 @@ class OpenApiSchemaGenerator(SchemaGenerator):
         if not serializer_class:
             return []
         else:
-            return self._get_serializer_fields(serializer_class, location, definitions)
+            return self._get_serializer_fields(serializer_class, location, definitions, path, '%sRequest' % method)
 
-    def get_response_object(self, response_serializer_class, description, definitions):
-
-        fields = self._get_serializer_fields(response_serializer_class, 'form', definitions)
+    def get_response_object(self, response_serializer_class, description, definitions, path, method):
+        fields = self._get_serializer_fields(response_serializer_class, 'form', definitions, path, '%sResponse' % method)
         res = _get_parameters(Link(fields=fields), None)
         schema = res[0]['schema']
         response_schema = {

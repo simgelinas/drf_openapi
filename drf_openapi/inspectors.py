@@ -82,8 +82,6 @@ def create_serializer_schema(field, definitions, title, description, allow_updat
     if not return_ref:
         return schema
     else:
-        if not allow_update_definitions:
-            print('hi')
         return coreschema.Ref(new_def_name)
 
 
