@@ -318,7 +318,7 @@ def _get_parameters(link, encoding):
     fields_and_parser = [(field, OpenApiFieldParser(link, field)) for field in link.fields]
     form_fields = [f for f in fields_and_parser if f[1].location == 'form']
     body_fields = [f for f in fields_and_parser if f[1].location == 'body']
-    query_param_fields = [f for f in fields_and_parser if f[1].location not in ('form', 'body')]
+    query_param_fields = [f for f in fields_and_parser if f[1].location == 'query']
 
     if len(form_fields) == 1 and form_fields[0][1].field_type == 'ref':
         parameters.append({
