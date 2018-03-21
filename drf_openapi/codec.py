@@ -38,6 +38,18 @@ def _is_dict_field(d):
     return False
 
 
+def add_additional_properties(result, additional_properties_schema):
+    additional_properties_field_type = _get_field_type(additional_properties_schema)
+    if additional_properties_field_type == 'ref':
+        result['additionalProperties'] = {
+            '$ref': '#/definitions/%s' % additional_properties_schema.ref_name
+        }
+    else:
+        result['additionalProperties'] = {
+            'type': additional_properties_field_type
+        }
+
+
 def parse_nested_field(nested_field):
     items_type = _get_field_type(nested_field)
 
@@ -60,9 +72,7 @@ def parse_nested_field(nested_field):
             result['items'] = {'type': type}
             if hasattr(items, 'properties'):
                 if _is_dict_field(items):
-                    result['additionalProperties'] = {
-                        'type': _get_field_type(items.additional_properties_schema)
-                    }
+                    add_additional_properties(result, items.additional_properties_schema)
                 else:
                     result['items']['properties'] = {
                         name: parse_nested_field(prop) for name, prop in items.properties.items()
@@ -74,9 +84,7 @@ def parse_nested_field(nested_field):
     elif items_type == 'object':
         if hasattr(nested_field, 'schema'):
             if _is_dict_field(nested_field.schema):
-                result['additionalProperties'] = {
-                    'type': _get_field_type(nested_field.schema.additional_properties_schema)
-                }
+                add_additional_properties(result, nested_field.schema.additional_properties_schema)
             else:
                 result['properties'] = {
                     name: parse_nested_field(prop) for name, prop in nested_field.schema.properties.items()
@@ -84,9 +92,7 @@ def parse_nested_field(nested_field):
                 result['required'] = nested_field.schema.required
         elif hasattr(nested_field, 'properties'):
             if _is_dict_field(nested_field):
-                result['additionalProperties'] = {
-                    'type': _get_field_type(nested_field.additional_properties_schema)
-                }
+                add_additional_properties(result, nested_field.additional_properties_schema)
             else:
                 result['properties'] = {
                     name: parse_nested_field(prop) for name, prop in nested_field.properties.items()

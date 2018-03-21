@@ -56,7 +56,7 @@ def create_serializer_schema(field, definitions, title, description, allow_updat
             if nested_field_existing != nested_field_new:
                 for old_def_name in definitions.keys():
                     old_def = definitions[old_def_name]
-                    if new_def_name in old_def.sub_defs:
+                    if old_def is not None and new_def_name in old_def.sub_defs:
                         new_properties = {}
                         for k, v in old_def.schema_object.properties.items():
                             if isinstance(v, coreschema.Ref) and v.ref == new_def_name:
