@@ -192,7 +192,7 @@ class OpenApiSchemaGenerator(SchemaGenerator):
                 description = description + '\n\n**Request Description:**\n' + request_doc
 
         fields = self.get_path_fields(path, method, view)
-        fields += self.get_serializer_fields(method, view, path, method_func)
+        fields += self.get_serializer_fields(method, view, method_func)
         fields += view.schema.get_pagination_fields(path, method)
         fields += view.schema.get_filter_fields(path, method)
 
@@ -206,7 +206,7 @@ class OpenApiSchemaGenerator(SchemaGenerator):
         if res_class_description:
             description += res_class_description
         if response_serializer_class:
-            response_schema, error_status_codes = self.get_response_object(response_serializer_class, method_func.__doc__, path, method, method_func.__module__)
+            response_schema, error_status_codes = self.get_response_object(response_serializer_class, method_func.__doc__, method, view)
         else:
             response_schema, error_status_codes = ({}, {})
 
@@ -326,15 +326,16 @@ class OpenApiSchemaGenerator(SchemaGenerator):
                 description=description
             )
 
-    def _get_serializer_fields(self, serializer_class, location, path, suffix, method_func_module):
+    def _get_serializer_fields(self, serializer_class, location, suffix, view):
         serializer = serializer_class()
         if location != 'query':
             schema_field = field_to_schema(serializer, self.definitions, False)
             if not isinstance(schema_field, coreschema.Ref):
-                new_ref_name = '_'.join([re.sub('\W+', '', i).title() for i in path.split('/') if i])
-                new_ref_name += '__' + suffix
+                new_ref_name = '_'.join(view.__class__.__module__.split('.')) + '__' + view.__class__.__name__ + suffix
+                print(new_ref_name)
                 while new_ref_name in self.definitions:
                     new_ref_name += '_1'
+                print(new_ref_name)
                 self.definitions[new_ref_name] = Definition(schema_field, [])
                 schema_field = coreschema.Ref(new_ref_name)
 
@@ -375,7 +376,7 @@ class OpenApiSchemaGenerator(SchemaGenerator):
                 fields.append(field)
             return fields
 
-    def get_serializer_fields(self, method, view, path, method_func):
+    def get_serializer_fields(self, method, view, method_func):
         """
         Return a list of `coreapi.Field` instances corresponding to any
         request body input, as determined by the serializer class.
@@ -389,10 +390,10 @@ class OpenApiSchemaGenerator(SchemaGenerator):
         if not serializer_class:
             return []
         else:
-            return self._get_serializer_fields(serializer_class, location, path, '%sRequest' % method, method_func.__module__)
+            return self._get_serializer_fields(serializer_class, location, '%sRequest' % method, view)
 
-    def get_response_object(self, response_serializer_class, description, path, method, method_func_module):
-        fields = self._get_serializer_fields(response_serializer_class, 'form', path, '%sResponse' % method, method_func_module)
+    def get_response_object(self, response_serializer_class, description, method, view):
+        fields = self._get_serializer_fields(response_serializer_class, 'form', '%sResponse' % method, view)
         res = _get_parameters(Link(fields=fields), None)
         schema = res[0]['schema']
         response_schema = {
