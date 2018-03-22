@@ -256,21 +256,7 @@ def _get_definitions(document):
     """
     Returns dictionary with schema definitions.
     """
-    definitions = OrderedDict()
-    for def_key, def_data in document.definitions.iteritems():
-        def_key_path = def_key.split('/')
-        if len(def_key_path) == 0:
-            raise Exception('how could it!')
-        elif len(def_key_path) == 1:
-            definitions[def_key_path[0]] = parse_nested_field(def_data)
-        else:
-            d = definitions
-            for k in def_key_path[:-1]:
-                if k not in d:
-                    d[k] = OrderedDict()
-                d = d[k]
-            d[def_key_path[-1]] = parse_nested_field(def_data)
-    return definitions
+    return OrderedDict({def_key: parse_nested_field(def_data) for def_key, def_data in document.definitions.items()})
 
 
 def _get_operation(operation_id, link, tags):

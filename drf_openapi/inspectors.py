@@ -21,7 +21,7 @@ class Definition(object):
 
 
 def create_serializer_schema(field, definitions, title, description, allow_update_definitions):
-    new_def_name = field.__class__.__module__.replace('.', '/') + '/' + field.__class__.__name__
+    new_def_name = field.__class__.__module__.replace('.', '_') + '__' + field.__class__.__name__
     sub_definitions = {}
     schema = coreschema.Object(
                 properties=OrderedDict([
@@ -34,16 +34,6 @@ def create_serializer_schema(field, definitions, title, description, allow_updat
                 title=title,
                 description=description
             )
-
-    # To be clear, this should never happen, keeping in as a check for now
-    for sub_def_name, sub_def in sub_definitions.items():
-        if sub_def_name in definitions:
-            nested_field_existing = parse_nested_field(definitions[sub_def_name])
-            nested_field_new = parse_nested_field(sub_def)
-            if nested_field_existing != nested_field_new:
-                raise Exception('Sub def not matching, how did this happen?')
-        else:
-            raise Exception('How is sub def not already in dict')
 
     return_ref = True
 
