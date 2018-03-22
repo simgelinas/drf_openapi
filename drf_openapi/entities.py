@@ -8,6 +8,7 @@ import uritemplate
 from coreapi import Link, Document, Field
 from coreapi.compat import force_text
 from django.db import models
+from django.utils.functional import Promise
 from pkg_resources import parse_version
 from rest_framework import serializers
 from rest_framework.fields import IntegerField, URLField
@@ -88,14 +89,14 @@ class VersionedSerializers:
 class OpenApiSchemaGenerator(SchemaGenerator):
     def __init__(self, version, title=None, url=None, description=None, patterns=None, urlconf=None):
         self.version = version
+        self.definitions = OrderedDict()
         super(OpenApiSchemaGenerator, self).__init__(title, url, description, patterns, urlconf)
 
     def get_schema(self, request=None, public=False):
         if self.endpoints is None:
             inspector = self.endpoint_inspector_cls(self.patterns, self.urlconf)
             self.endpoints = inspector.get_api_endpoints()
-        definitions = {}
-        links = self.get_links(definitions, None if public else request)
+        links = self.get_links(None if public else request)
         if not links:
             return None
 
@@ -110,10 +111,10 @@ class OpenApiSchemaGenerator(SchemaGenerator):
             description=self.description,
             url=url,
             content=links,
-            definitions=OrderedDict({k: v.schema_object for k, v in definitions.items() if v is not None}),
+            definitions=OrderedDict({k: v.schema_object for k, v in self.definitions.items() if v is not None}),
         )
 
-    def get_links(self, definitions, request=None):
+    def get_links(self, request=None):
         """
         Return a dictionary containing all the links that should be
         included in the API schema.
@@ -136,12 +137,12 @@ class OpenApiSchemaGenerator(SchemaGenerator):
             return None
         prefix = self.determine_path_prefix(paths)
 
-        self.populate_defintions(view_endpoints, definitions, version=getattr(request, 'version', None))
+        self.populate_defintions(view_endpoints, version=getattr(request, 'version', None))
 
         for path, method, view in view_endpoints:
             if not self.has_view_permissions(path, method, view):
                 continue
-            link = self.get_link(path, method, view, definitions, version=getattr(request, 'version', None))
+            link = self.get_link(path, method, view, version=getattr(request, 'version', None))
             subpath = path[len(prefix):]
             keys = self.get_keys(subpath, method, view)
             try:
@@ -179,7 +180,7 @@ class OpenApiSchemaGenerator(SchemaGenerator):
 
         return response_serializer_class, description
 
-    def get_link(self, path, method, view, definitions, version=None):
+    def get_link(self, path, method, view, version=None):
         method_name = getattr(view, 'action', method.lower())
         method_func = getattr(view, method_name, None)
 
@@ -191,7 +192,7 @@ class OpenApiSchemaGenerator(SchemaGenerator):
                 description = description + '\n\n**Request Description:**\n' + request_doc
 
         fields = self.get_path_fields(path, method, view)
-        fields += self.get_serializer_fields(method, view, definitions, path, method_func)
+        fields += self.get_serializer_fields(method, view, path, method_func)
         fields += view.schema.get_pagination_fields(path, method)
         fields += view.schema.get_filter_fields(path, method)
 
@@ -205,7 +206,7 @@ class OpenApiSchemaGenerator(SchemaGenerator):
         if res_class_description:
             description += res_class_description
         if response_serializer_class:
-            response_schema, error_status_codes = self.get_response_object(response_serializer_class, method_func.__doc__, definitions, path, method)
+            response_schema, error_status_codes = self.get_response_object(response_serializer_class, method_func.__doc__, path, method)
         else:
             response_schema, error_status_codes = ({}, {})
 
@@ -325,37 +326,57 @@ class OpenApiSchemaGenerator(SchemaGenerator):
                 description=description
             )
 
-    def _get_serializer_fields(self, serializer_class, location, definitions, path, suffix):
+    def _get_serializer_fields(self, serializer_class, location, path, suffix):
         serializer = serializer_class()
 
-        schema_field = field_to_schema(serializer, definitions, False)
+        schema_field = field_to_schema(serializer, self.definitions, False)
         if not isinstance(schema_field, coreschema.Ref):
             p = [re.sub('\W+', '', i).title() for i in path.split('/') if i]
             p.append(suffix)
             new_ref_name = ''.join(p)
-            while new_ref_name in definitions:
+            while new_ref_name in self.definitions:
                 new_ref_name += '_1'
-            definitions[new_ref_name] = Definition(schema_field, [])
+            self.definitions[new_ref_name] = Definition(schema_field, [])
             schema_field = coreschema.Ref(new_ref_name)
-        if isinstance(serializer, (serializers.ListSerializer, serializers.ListField)):
-            return [
-                Field(
-                    name='data',
-                    location=location,
-                    required=True,
-                    schema=coreschema.Array(items=schema_field)
-                )
-            ]
+        if location != 'query':
+            if isinstance(serializer, (serializers.ListSerializer, serializers.ListField)):
+                return [
+                    Field(
+                        name='data',
+                        location=location,
+                        required=True,
+                        schema=coreschema.Array(items=schema_field)
+                    )
+                ]
+            else:
+                return [
+                    Field(
+                        name='data',
+                        location=location,
+                        required=True,
+                        schema=schema_field)
+                ]
         else:
-            return [
-                Field(
-                    name='data',
-                    location=location,
-                    required=True,
-                    schema=schema_field)
-            ]
+            fields = []
+            for field in serializer.fields.values():
+                if field.read_only or isinstance(field, serializers.HiddenField):
+                    continue
 
-    def get_serializer_fields(self, method, view, definitions, path, method_func):
+                required = field.required
+                # if the attribute ('help_text') of this field is a lazy translation object, force it to generate a string
+                description = str(field.help_text) if isinstance(field.help_text, Promise) else field.help_text
+                fallback_schema = self.fallback_schema_from_field(field)
+                field = Field(
+                    name=field.field_name,
+                    location=location,
+                    required=required,
+                    schema=fallback_schema if fallback_schema else field_to_schema(field, {}, False),
+                    description=description,
+                )
+                fields.append(field)
+            return fields
+
+    def get_serializer_fields(self, method, view, path, method_func):
         """
         Return a list of `coreapi.Field` instances corresponding to any
         request body input, as determined by the serializer class.
@@ -369,10 +390,10 @@ class OpenApiSchemaGenerator(SchemaGenerator):
         if not serializer_class:
             return []
         else:
-            return self._get_serializer_fields(serializer_class, location, definitions, path, '%sRequest' % method)
+            return self._get_serializer_fields(serializer_class, location, path, '%sRequest' % method)
 
-    def get_response_object(self, response_serializer_class, description, definitions, path, method):
-        fields = self._get_serializer_fields(response_serializer_class, 'form', definitions, path, '%sResponse' % method)
+    def get_response_object(self, response_serializer_class, description, path, method):
+        fields = self._get_serializer_fields(response_serializer_class, 'form', path, '%sResponse' % method)
         res = _get_parameters(Link(fields=fields), None)
         schema = res[0]['schema']
         response_schema = {
@@ -389,7 +410,7 @@ class OpenApiSchemaGenerator(SchemaGenerator):
 
         return response_schema, error_status_codes
 
-    def populate_defintions(self, view_endpoints, definitions, version=None):
+    def populate_defintions(self, view_endpoints, version=None):
         for path, method, view in view_endpoints:
             if not self.has_view_permissions(path, method, view):
                 continue
@@ -399,11 +420,11 @@ class OpenApiSchemaGenerator(SchemaGenerator):
             self.get_serializer_class(view, method_func)
             request_serializer_class = self.get_serializer_class(view, method_func)
             if request_serializer_class:
-                field_to_schema(request_serializer_class(), definitions, True)
+                field_to_schema(request_serializer_class(), self.definitions, True)
 
             response_serializer_class, _ = self.get_response_serializer_class(view, method_func, method_name, version)
             if response_serializer_class:
-                field_to_schema(response_serializer_class(), definitions, True)
+                field_to_schema(response_serializer_class(), self.definitions, True)
 
 
 class OpenApiDocument(Document):

@@ -125,7 +125,14 @@ class OpenApiFieldParser:
     def as_parameter(self):
         if self.field_type == 'ref':
             return {'$ref': '#/definitions/%s' % self.field.schema.ref_name}
-        elif (self.field_type == 'object' and self.location_string != 'query') or self.field_type == 'array':
+        elif self.field_type == 'object' and self.location_string == 'query':
+            param = {
+                'name': self.field.name,
+                'required': self.field_required,
+                'description': self.field_description,
+                'type': 'string',
+            }
+        elif self.field_type == 'object' or self.field_type == 'array':
             param = parse_nested_field(self.field)
         elif self.field_type  == 'enum':
             # CoreApi and OpenApi don't handle Enum the same way (field property vs field type)
@@ -251,7 +258,18 @@ def _get_definitions(document):
     """
     definitions = OrderedDict()
     for def_key, def_data in document.definitions.iteritems():
-        definitions[def_key] = parse_nested_field(def_data)
+        def_key_path = def_key.split('/')
+        if len(def_key_path) == 0:
+            raise Exception('how could it!')
+        elif len(def_key_path) == 1:
+            definitions[def_key_path[0]] = parse_nested_field(def_data)
+        else:
+            d = definitions
+            for k in def_key_path[:-1]:
+                if k not in d:
+                    d[k] = OrderedDict()
+                d = d[k]
+            d[def_key_path[-1]] = parse_nested_field(def_data)
     return definitions
 
 

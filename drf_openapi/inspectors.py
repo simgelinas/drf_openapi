@@ -21,7 +21,7 @@ class Definition(object):
 
 
 def create_serializer_schema(field, definitions, title, description, allow_update_definitions):
-    new_def_name = '_'.join([field.__class__.__module__.replace('.', '_'), field.__class__.__name__])
+    new_def_name = field.__class__.__module__.replace('.', '/') + '/' + field.__class__.__name__
     sub_definitions = {}
     schema = coreschema.Object(
                 properties=OrderedDict([
