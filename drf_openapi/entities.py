@@ -332,10 +332,8 @@ class OpenApiSchemaGenerator(SchemaGenerator):
             schema_field = field_to_schema(serializer, self.definitions, False)
             if not isinstance(schema_field, coreschema.Ref):
                 new_ref_name = '_'.join(view.__class__.__module__.split('.')) + '__' + view.__class__.__name__ + suffix
-                print(new_ref_name)
                 while new_ref_name in self.definitions:
                     new_ref_name += '_1'
-                print(new_ref_name)
                 self.definitions[new_ref_name] = Definition(schema_field, [])
                 schema_field = coreschema.Ref(new_ref_name)
 
