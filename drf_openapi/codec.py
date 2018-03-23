@@ -72,7 +72,7 @@ def parse_nested_field(nested_field):
             result['items'] = {'type': type}
             if hasattr(items, 'properties'):
                 if _is_dict_field(items):
-                    add_additional_properties(result, items.additional_properties_schema)
+                    add_additional_properties(result['items'], items.additional_properties_schema)
                 else:
                     result['items']['properties'] = {
                         name: parse_nested_field(prop) for name, prop in items.properties.items()
