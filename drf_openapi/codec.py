@@ -78,6 +78,8 @@ def parse_nested_field(nested_field):
                         name: parse_nested_field(prop) for name, prop in items.properties.items()
                     }
                     result['items']['required'] = items.required
+            elif hasattr(items, 'items'):
+                result['items']['items'] = parse_nested_field(items.items)
             if type == 'enum':
                 result['items']['type'] = 'string'
                 result['items']['enum'] = items.enum

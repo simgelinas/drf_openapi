@@ -90,11 +90,9 @@ def field_to_schema(field, definitions, allow_update_definitions):
                 child_class = child_class.child.__class__()
 
             description = '{}D Array'.format(array_dimensions) + description
-            child_schema = field_to_schema(child_class.child, definitions, allow_update_definitions)
-        else:
-            child_schema = field_to_schema(field.child, definitions, allow_update_definitions)
+
         return coreschema.Array(
-            items=child_schema,
+            items=field_to_schema(field.child, definitions, allow_update_definitions),
             title=title,
             description=description
         )
